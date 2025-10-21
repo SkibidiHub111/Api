@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, abort
-import sqlite3, threading, time, datetime
+import sqlite3, threading, time, datetime, os
 
 DB = "keys.db"
 app = Flask(__name__)
@@ -50,19 +50,16 @@ def get_all_keys():
         })
     return keys
 
-def update_key_hwid(key_id, hwid):
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute('UPDATE keys SET hwid = ? WHERE id = ?', (hwid, key_id))
-    conn.commit()
-    conn.close()
-
 def delete_key(key_id):
     conn = sqlite3.connect(DB)
     c = conn.cursor()
     c.execute('DELETE FROM keys WHERE id = ?', (key_id,))
     conn.commit()
     conn.close()
+
+@app.route('/')
+def index():
+    return jsonify({"status": "ok", "message": "API online"})
 
 @app.route('/keys', methods=['POST'])
 def post_key():
@@ -72,10 +69,10 @@ def post_key():
     months = int(j.get('months', 1))
     hwid_bypass = bool(j.get('hwid_bypass', False))
     if not key:
-        return jsonify({"error":"key required"}), 400
+        return jsonify({"error": "key required"}), 400
     hwid = "BYPASS" if hwid_bypass else None
     key_id = add_key_to_db(key, hwid, months)
-    return jsonify({"status":"ok","id": key_id}), 201
+    return jsonify({"status": "ok", "id": key_id}), 201
 
 @app.route('/keys', methods=['GET'])
 def list_keys():
@@ -86,7 +83,6 @@ def list_keys():
 def patch_key(key_id):
     j = request.get_json()
     if not j: abort(400)
-    # support setting hwid to null by sending {"hwid": null}
     if 'hwid' in j:
         hw = j['hwid']
         conn = sqlite3.connect(DB)
@@ -94,13 +90,13 @@ def patch_key(key_id):
         c.execute('UPDATE keys SET hwid = ? WHERE id = ?', (hw, key_id))
         conn.commit()
         conn.close()
-        return jsonify({"status":"ok"}), 200
-    return jsonify({"error":"no valid field"}), 400
+        return jsonify({"status": "ok"}), 200
+    return jsonify({"error": "no valid field"}), 400
 
 @app.route('/keys/<int:key_id>', methods=['DELETE'])
 def del_key(key_id):
     delete_key(key_id)
-    return jsonify({"status":"deleted"}), 200
+    return jsonify({"status": "deleted"}), 200
 
 def cleanup_loop():
     while True:
@@ -113,10 +109,10 @@ def cleanup_loop():
             conn.close()
         except Exception:
             pass
-        time.sleep(3600) 
+        time.sleep(3600)
 
 if __name__ == '__main__':
     init_db()
-    t = threading.Thread(target=cleanup_loop, daemon=True)
-    t.start()
-    app.run(host='0.0.0.0', port=5000)
+    threading.Thread(target=cleanup_loop, daemon=True).start()
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)

@@ -50,6 +50,13 @@ def get_all_keys():
         })
     return keys
 
+def update_key_hwid(key_id, hwid):
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute('UPDATE keys SET hwid = ? WHERE id = ?', (hwid, key_id))
+    conn.commit()
+    conn.close()
+
 def delete_key(key_id):
     conn = sqlite3.connect(DB)
     c = conn.cursor()
@@ -59,7 +66,7 @@ def delete_key(key_id):
 
 @app.route('/')
 def index():
-    return jsonify({"status": "ok", "message": "API online"})
+    return jsonify({"status": "ok", "message": "API online"}), 200
 
 @app.route('/keys', methods=['POST'])
 def post_key():
@@ -97,6 +104,41 @@ def patch_key(key_id):
 def del_key(key_id):
     delete_key(key_id)
     return jsonify({"status": "deleted"}), 200
+
+@app.route('/verify', methods=['GET'])
+def verify_key():
+    key = request.args.get('key')
+    hwid = request.args.get('hwid')
+    if not key:
+        return jsonify({"status": "error", "message": "missing key"}), 400
+
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute('SELECT id, hwid, expires_at FROM keys WHERE key = ?', (key,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({"status": "invalid", "message": "key not found"}), 404
+
+    key_id, saved_hwid, exp = row
+    if datetime.datetime.fromisoformat(exp) < datetime.datetime.utcnow():
+        return jsonify({"status": "expired", "message": "key expired"}), 403
+
+    if saved_hwid == "BYPASS":
+        return jsonify({"status": "ok", "message": "key valid (bypass)", "id": key_id}), 200
+
+    if saved_hwid and hwid and saved_hwid != hwid:
+        return jsonify({"status": "invalid", "message": "hwid mismatch"}), 403
+
+    if not saved_hwid and hwid:
+        conn = sqlite3.connect(DB)
+        c = conn.cursor()
+        c.execute('UPDATE keys SET hwid = ? WHERE id = ?', (hwid, key_id))
+        conn.commit()
+        conn.close()
+
+    return jsonify({"status": "ok", "message": "key valid", "id": key_id}), 200
 
 def cleanup_loop():
     while True:

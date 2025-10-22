@@ -1,4 +1,3 @@
-Flask==3.0.3
-requests==2.31.0
-discord.py==2.4.0
-psutil==5.9.8
+flask
+psycopg2-binary
+gunicorn

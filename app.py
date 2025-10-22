@@ -17,39 +17,28 @@ def init_db():
         hwid TEXT,
         months INTEGER NOT NULL,
         created_at TEXT NOT NULL,
-        expires_at TEXT NOT NULL,
-        discord_id TEXT
+        expires_at TEXT NOT NULL
     )
     ''')
     conn.commit()
     conn.close()
 
-def add_key_to_db(key, hwid, months, discord_id):
+def add_key_to_db(key, hwid, months):
     created = datetime.datetime.utcnow()
     expires = created + datetime.timedelta(days=30 * months)
     conn = get_conn()
     c = conn.cursor()
-    c.execute('''
-        INSERT INTO keys (key, hwid, months, created_at, expires_at, discord_id)
-        VALUES (%s,%s,%s,%s,%s,%s) RETURNING id
-    ''', (key, hwid, months, created.isoformat(), expires.isoformat(), discord_id))
+    c.execute('INSERT INTO keys (key, hwid, months, created_at, expires_at) VALUES (%s,%s,%s,%s,%s) RETURNING id',
+              (key, hwid, months, created.isoformat(), expires.isoformat()))
     key_id = c.fetchone()[0]
     conn.commit()
     conn.close()
-    return {
-        "id": key_id,
-        "key": key,
-        "hwid": hwid,
-        "months": months,
-        "created_at": created.isoformat(),
-        "expires_at": expires.isoformat(),
-        "discord_id": discord_id
-    }
+    return key_id
 
 def get_all_keys():
     conn = get_conn()
     c = conn.cursor()
-    c.execute('SELECT id, key, hwid, months, created_at, expires_at, discord_id FROM keys')
+    c.execute('SELECT id,key,hwid,months,created_at,expires_at FROM keys')
     rows = c.fetchall()
     conn.close()
     keys = []
@@ -60,8 +49,7 @@ def get_all_keys():
             "hwid": r[2],
             "months": r[3],
             "created_at": r[4],
-            "expires_at": r[5],
-            "discord_id": r[6]
+            "expires_at": r[5]
         })
     return keys
 
@@ -79,27 +67,25 @@ def index():
 @app.route('/keys', methods=['POST'])
 def post_key():
     j = request.get_json()
-    if not j:
-        abort(400)
+    if not j: abort(400)
     key = j.get('key')
     months = int(j.get('months', 1))
     hwid_bypass = bool(j.get('hwid_bypass', False))
-    discord_id = j.get('discord_id')
     if not key:
         return jsonify({"error": "key required"}), 400
     hwid = "BYPASS" if hwid_bypass else None
-    data = add_key_to_db(key, hwid, months, discord_id)
-    return jsonify({"status": "ok", "data": data}), 201
+    key_id = add_key_to_db(key, hwid, months)
+    return jsonify({"status": "ok", "id": key_id}), 201
 
 @app.route('/keys', methods=['GET'])
 def list_keys():
-    return jsonify(get_all_keys()), 200
+    keys = get_all_keys()
+    return jsonify(keys), 200
 
 @app.route('/keys/<int:key_id>', methods=['PATCH'])
 def patch_key(key_id):
     j = request.get_json()
-    if not j:
-        abort(400)
+    if not j: abort(400)
     if 'hwid' in j:
         hw = j['hwid']
         conn = get_conn()

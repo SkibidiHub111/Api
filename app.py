@@ -1,16 +1,18 @@
 from flask import Flask, request, jsonify, abort
-import sqlite3, threading, time, datetime, os
+import psycopg2, threading, time, datetime, os
 
-DB = "/var/data/keys.db"
+DATABASE_URL = "postgresql://keysdb_94t2_user:blxPheWDksBZ2wt7lXuqlMTtgehOt3YQ@dpg-d3sbfsh5pdvs73fe8en0-a.oregon-postgres.render.com/keysdb_94t2"
 app = Flask(__name__)
 
+def get_conn():
+    return psycopg2.connect(DATABASE_URL)
+
 def init_db():
-    os.makedirs(os.path.dirname(DB), exist_ok=True)
-    conn = sqlite3.connect(DB)
+    conn = get_conn()
     c = conn.cursor()
     c.execute('''
     CREATE TABLE IF NOT EXISTS keys (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         key TEXT NOT NULL,
         hwid TEXT,
         months INTEGER NOT NULL,
@@ -24,17 +26,17 @@ def init_db():
 def add_key_to_db(key, hwid, months):
     created = datetime.datetime.utcnow()
     expires = created + datetime.timedelta(days=30 * months)
-    conn = sqlite3.connect(DB)
+    conn = get_conn()
     c = conn.cursor()
-    c.execute('INSERT INTO keys (key, hwid, months, created_at, expires_at) VALUES (?,?,?,?,?)',
+    c.execute('INSERT INTO keys (key, hwid, months, created_at, expires_at) VALUES (%s,%s,%s,%s,%s) RETURNING id',
               (key, hwid, months, created.isoformat(), expires.isoformat()))
+    key_id = c.fetchone()[0]
     conn.commit()
-    key_id = c.lastrowid
     conn.close()
     return key_id
 
 def get_all_keys():
-    conn = sqlite3.connect(DB)
+    conn = get_conn()
     c = conn.cursor()
     c.execute('SELECT id,key,hwid,months,created_at,expires_at FROM keys')
     rows = c.fetchall()
@@ -52,9 +54,9 @@ def get_all_keys():
     return keys
 
 def delete_key(key_id):
-    conn = sqlite3.connect(DB)
+    conn = get_conn()
     c = conn.cursor()
-    c.execute('DELETE FROM keys WHERE id = ?', (key_id,))
+    c.execute('DELETE FROM keys WHERE id = %s', (key_id,))
     conn.commit()
     conn.close()
 
@@ -86,9 +88,9 @@ def patch_key(key_id):
     if not j: abort(400)
     if 'hwid' in j:
         hw = j['hwid']
-        conn = sqlite3.connect(DB)
+        conn = get_conn()
         c = conn.cursor()
-        c.execute('UPDATE keys SET hwid = ? WHERE id = ?', (hw, key_id))
+        c.execute('UPDATE keys SET hwid = %s WHERE id = %s', (hw, key_id))
         conn.commit()
         conn.close()
         return jsonify({"status": "ok"}), 200
@@ -105,9 +107,9 @@ def verify_key():
     hwid = request.args.get('hwid')
     if not key:
         return jsonify({"status": "error", "message": "missing key"}), 400
-    conn = sqlite3.connect(DB)
+    conn = get_conn()
     c = conn.cursor()
-    c.execute('SELECT id, hwid, expires_at FROM keys WHERE key = ?', (key,))
+    c.execute('SELECT id, hwid, expires_at FROM keys WHERE key = %s', (key,))
     row = c.fetchone()
     conn.close()
     if not row:
@@ -120,9 +122,9 @@ def verify_key():
     if saved_hwid and hwid and saved_hwid != hwid:
         return jsonify({"status": "invalid", "message": "hwid mismatch"}), 403
     if not saved_hwid and hwid:
-        conn = sqlite3.connect(DB)
+        conn = get_conn()
         c = conn.cursor()
-        c.execute('UPDATE keys SET hwid = ? WHERE id = ?', (hwid, key_id))
+        c.execute('UPDATE keys SET hwid = %s WHERE id = %s', (hwid, key_id))
         conn.commit()
         conn.close()
     return jsonify({"status": "ok", "message": "key valid", "id": key_id}), 200
@@ -131,9 +133,9 @@ def cleanup_loop():
     while True:
         try:
             now = datetime.datetime.utcnow().isoformat()
-            conn = sqlite3.connect(DB)
+            conn = get_conn()
             c = conn.cursor()
-            c.execute('DELETE FROM keys WHERE expires_at <= ?', (now,))
+            c.execute('DELETE FROM keys WHERE expires_at <= %s', (now,))
             conn.commit()
             conn.close()
         except Exception:

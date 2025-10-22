@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, abort
 import psycopg2, threading, time, datetime, os
 
-DATABASE_URL = "postgresql://keysdb_94t2_user:blxPheWDksBZ2wt7lXuqlMTtgehOt3YQ@dpg-d3sbfsh5pdvs73fe8en0-a.oregon-postgres.render.com/keysdb_94t2"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://YOUR_URL_HERE")
 app = Flask(__name__)
 
 def get_conn():
@@ -42,9 +42,8 @@ def get_all_keys():
     c.execute('SELECT id,key,hwid,months,discord_id,created_at,expires_at FROM keys')
     rows = c.fetchall()
     conn.close()
-    keys = []
-    for r in rows:
-        keys.append({
+    return [
+        {
             "id": r[0],
             "key": r[1],
             "hwid": r[2],
@@ -52,15 +51,9 @@ def get_all_keys():
             "discord_id": r[4],
             "created_at": r[5],
             "expires_at": r[6]
-        })
-    return keys
-
-def delete_key(key_id):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute('DELETE FROM keys WHERE id = %s', (key_id,))
-    conn.commit()
-    conn.close()
+        }
+        for r in rows
+    ]
 
 @app.route('/')
 def index():
@@ -68,13 +61,11 @@ def index():
 
 @app.route('/keys', methods=['POST'])
 def post_key():
-    j = request.get_json()
-    if not j:
-        abort(400)
+    j = request.get_json(force=True)
     key = j.get('key')
     months = int(j.get('months', 1))
     hwid_bypass = bool(j.get('hwid_bypass', False))
-    discord_id = j.get('discord_id')  # ✅ Lấy Discord ID từ request
+    discord_id = j.get('discord_id')
     if not key:
         return jsonify({"error": "key required"}), 400
     hwid = "BYPASS" if hwid_bypass else None
@@ -83,28 +74,19 @@ def post_key():
 
 @app.route('/keys', methods=['GET'])
 def list_keys():
-    keys = get_all_keys()
-    return jsonify(keys), 200
+    return jsonify(get_all_keys()), 200
 
 @app.route('/keys/<int:key_id>', methods=['PATCH'])
 def patch_key(key_id):
-    j = request.get_json()
-    if not j:
-        abort(400)
-    if 'hwid' in j:
-        hw = j['hwid']
-        conn = get_conn()
-        c = conn.cursor()
-        c.execute('UPDATE keys SET hwid = %s WHERE id = %s', (hw, key_id))
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "ok"}), 200
-    return jsonify({"error": "no valid field"}), 400
-
-@app.route('/keys/<int:key_id>', methods=['DELETE'])
-def del_key(key_id):
-    delete_key(key_id)
-    return jsonify({"status": "deleted"}), 200
+    j = request.get_json(force=True)
+    if 'hwid' not in j:
+        return jsonify({"error": "no valid field"}), 400
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute('UPDATE keys SET hwid = %s WHERE id = %s', (j['hwid'], key_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok"}), 200
 
 @app.route('/verify', methods=['GET'])
 def verify_key():
@@ -143,8 +125,8 @@ def cleanup_loop():
             c.execute('DELETE FROM keys WHERE expires_at <= %s', (now,))
             conn.commit()
             conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            print("Cleanup error:", e)
         time.sleep(3600)
 
 if __name__ == '__main__':

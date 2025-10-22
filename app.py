@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, abort
-import psycopg2, threading, time, datetime, os
+import psycopg2 as psycopg2, threading, time, datetime, os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://YOUR_URL_HERE")
 app = Flask(__name__)
